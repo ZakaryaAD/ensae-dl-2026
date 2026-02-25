@@ -69,22 +69,107 @@ def estimate_loss():
     return out
 
 # Copy your Head, MultiHeadAttention, FeedForward and Block classes here
-    
+# Add weighted masked attention and dropout. Dropout comes after the softmax and before the multiplication with the value matrix.
+# Copy the Head class from the previous exercise and expand upon it.
+
+class Head(nn.Module):
+
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embd, head_size, bias = False)
+        self.query = nn.Linear(n_embd, head_size, bias = False)
+        self.value = nn.Linear(n_embd, head_size, bias = False)
+        
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # store a persistent buffer for the forward pass
+        self.dropout = nn.Dropout(dropout)
+    def forward (self, x):
+        B, T, C = x.shape
+        q = self.query(x) # B, T, head_size
+        k = self.key(x) # B, T, head_size
+        v = self.value(x) # B, T, head_size
+        Dh = math.sqrt(k.shape[-1])
+        attn = q @ k.transpose(-2,-1) / Dh
+
+    #Le mask 
+        attn = attn.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
+        attn = F.softmax(attn, dim = -1) # B T T 
+        attn = self.dropout(attn)
+        out = attn @ v
+        
+        return out
+
+# A multi-head attention module contains a list of heads and a linear projection layer.
+# The heads are applied to the input and then concatenated along the last dimension, then
+# the linear layer is applied. Look at the unit test below to determine the dimensions of
+# the linear layer.
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(num_heads * head_size, n_embd, bias=True)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward (self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)  # B, T, num_heads*head_size
+        out = self.proj(out)                                 # B, T, n_embd
+        out = self.dropout(out)
+        return out
+
+
+class FeedForward(nn.Module):
+    """ a simple linear layer followed by a non-linearity """
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd),
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd)
+            nn.Dropout(dropout)
+        )
+        
+
+    def forward(self, x):
+        out = self.net(x)
+        return out
+
+class Block(nn.Module):
+
+    def __init__(self, n_embd, n_head):
+        super().__init__()
+        head_size = n_embd // n_head
+        self.sa = MultiHeadAttention(n_head, head_size)
+        self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
+
+    def forward(self, x):
+        out = x + self.sa(self.ln1(x))
+        out = out + self.ffwd(self.ln2(out))
+        return out
+
 class GPT(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = ???
-        self.pos_embedding_table = ???
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.pos_embedding_table = nn.Embedding(block_size, n_embd)
         # define blocks, a layer norm and a linear layer
-        ???
+            
+        self.blocks = nn.Sequential(*[Block(n_embd, n_heads) for _ in range(n_layer)])
+        self.ln_f   = nn.LayerNorm(n_embd)             
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
-        token_emb = ??? # (B,T,C)
+        token_emb = self.token_embedding_table(idx) # (B,T,C)
         pos_emb = self.pos_embedding_table(torch.arange(T, device=device)) # (T, C)
-        x = ??? # sum the token embeddings and position embeddings
-        ??? # apply blocks, layer norm and linear layer (leading to the logits variable)
+        x = token_emb + pos_emb  # sum the token embeddings and position embeddings
+        # apply blocks, layer norm and linear layer (leading to the logits variable)
+        
+        x = self.blocks(x)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)  # (B, T, vocab_size)
 
         # do not modify the rest of the method (it computes the loss during the forward pass)
         if targets is None:
