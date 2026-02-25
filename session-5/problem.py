@@ -94,7 +94,77 @@ def count_parameters(model):
 
 
 class PlainNet(nn.Module):
-    ???
+    # Build a PlainNet architecture as described in the paper: https://arxiv.org/pdf/1512.03385.pdf
+    def __init__(self, output_dim, layers):
+        super().__init__()
+
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        )
+        layer2 = []
+        for _ in range(layers[0]):
+            layer2 += [
+                nn.Conv2d(64,64, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(64), 
+                nn.ReLU(),
+            ]
+        self.layer2 = nn.Sequential(*layer2)
+        # same for layers 3, 4 and 5
+        layer3 = []
+        layer3 += [
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        ]
+        for _ in range(layers[1]):
+            layer3 += [
+                nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1), # fill in the arguments
+                nn.BatchNorm2d(128), # fill in the arguments
+                nn.ReLU(),
+            ]
+        self.layer3 = nn.Sequential(*layer3)
+        layer4 = []
+        layer4 += [
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+        ]
+        for _ in range(layers[2]):
+            layer4 += [
+                nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1), # fill in the arguments
+                nn.BatchNorm2d(256), # fill in the arguments
+                nn.ReLU(),
+            ]
+        self.layer4 = nn.Sequential(*layer4)
+        layer5 = []
+        layer5 += [
+            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+        ]
+        for _ in range(layers[3]):
+            layer5 += [
+                nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1), # fill in the arguments
+                nn.BatchNorm2d(512), # fill in the arguments
+                nn.ReLU(),
+            ]
+        self.layer5 = nn.Sequential(*layer5)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Sequential(nn.Flatten(), nn.Linear(512, output_dim)) # fill in the arguments
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        x = self.avgpool(x)
+        x = self.fc(x)
+
+        # use x = x.reshape(x.size(0), -1) or a nn.Flatten() layer  before the linear layer
+        return x
 
 def train(model, num_epochs=10):
 
@@ -196,11 +266,72 @@ save_model (model, 'plain-34')
 # explanation: https://erikgaas.medium.com/resnet-torchvision-bottlenecks-and-layers-not-as-they-seem-145620f93096
     
 class ResidualBlock(nn.Module):
-    ???
+    expansion = 1
+
+    def __init__(self, in_channels, out_channels, stride = 1, downsample = None):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Sequential(  nn.Conv2d(in_channels, out_channels,
+                      kernel_size=3, stride=stride,
+                      padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True))
+        self.conv2 = nn.Sequential(nn.Conv2d(out_channels, out_channels,
+                      kernel_size=3, stride=1,
+                      padding=1, bias=False),
+            nn.BatchNorm2d(out_channels))
+        self.downsample = downsample
+        self.relu = nn.ReLU()
+        self.out_channels = out_channels
+        
+    def forward(self, x):
+        residual = x  
+
+        out = self.conv1(x)
+        out = self.conv2(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out += residual  
+        out = self.relu(out)
+        return out
 
 
 class Bottleneck(nn.Module):
-    ???
+    expansion = 4
+    def __init__(self, in_channels, out_channels, stride = 1, downsample = None):
+        super(Bottleneck, self).__init__()
+        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True))
+        self.conv2 = nn.Sequential(nn.Conv2d(out_channels, out_channels,
+                      kernel_size=3, stride=stride,
+                      padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True))
+        self.conv3 = nn.Sequential(nn.Conv2d(out_channels, out_channels*self.expansion,
+                      kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels*self.expansion),
+            )
+        self.downsample = downsample
+        self.relu = nn.ReLU()
+        self.out_channels = out_channels
+        self.stride = stride
+        
+    def forward(self, x):
+        residual = x  
+
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out += residual  
+        out = self.relu(out)
+        return out
 
 
 class ResNet(nn.Module):
